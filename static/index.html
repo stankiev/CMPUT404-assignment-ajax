@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width" />
     <meta name="license" content="
         Copyright 2013 Abram Hindle
+        Copyright 2015 Dylan Stankievech
         
         Licensed under the Apache License, Version 2.0 (the "License");
         you may not use this file except in compliance with the License.
@@ -32,14 +33,15 @@ var W = canvas.width  = window.innerWidth-6;
 var H = canvas.height = window.innerHeight-50;
 
 
-function sendJSONXMLHTTPRequest(url, objects, callback) {
+function sendJSONXMLHTTPRequest(url, objects, callback) {   
     var xhr = new XMLHttpRequest();
     xhr.onreadystatechange = function () {
         if (xhr.readyState==4) {
             try {
                 if (xhr.status==200) {
-                    //XXX: parse some JSON from the request!
-                    //XXX: Pass the data to the callback!
+                    // Parse the JSON response, send it to callback function
+                    data = JSON.parse(xhr.responseText);
+                    callback(data);
                 }
             } 
             catch(e) {
@@ -47,26 +49,41 @@ function sendJSONXMLHTTPRequest(url, objects, callback) {
             }
         }
     };
-    //XXX: POST to a URL
-    //XXX: set the mimetype and the accept headers!
-    // Remember to use application/json !
-}
 
+    // To send a POST request to the given URL
+    xhr.open("POST", url, true);
+
+    // Set appropriate headers
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.setRequestHeader("Accept", "application/json");
+
+    // Send data with the request, if there is any
+    if (objects == null) {
+        xhr.send();
+    }
+    else {
+        xhr.send(JSON.stringify(objects));
+    }
+}
 
 world = {};
 
-//XXX: TODO Make this prettier!
 function drawCircle(context,entity) {
     with(context) {
         beginPath();              
-        lineWidth = 3;
+        lineWidth = 4;
         var x = entity["x"];
         var y = entity["y"];
-        //moveTo(x,y);
-        fillStyle = entity["colour"];
-        strokeStyle = fillStyle;
-        arc(x, y, (entity["radius"])?entity["radius"]:50, 0, 2.0 * Math.PI, false);  
-        stroke();                                
+
+        // Linear gradient because it's pretty I guess
+        var gradient= createLinearGradient(0, 0, c.width, 0);
+        gradient.addColorStop("0", "orange");
+        gradient.addColorStop("0.5", entity["colour"]);
+        gradient.addColorStop("1.0", "turquoise");
+
+        strokeStyle = gradient;
+        arc(x, y, (entity["radius"])?entity["radius"]:50, 0, 2.0 * Math.PI, false);
+        stroke();                             
     }
 }
 
@@ -136,9 +153,12 @@ function getPosition(e) {
 
 function addEntity(entity, data) {
     world[entity] = data;
-    drawNextFrame(); // (but should we?)
-    //XXX: Send a XHTML Request that updates the entity you just  modified!
+    drawNextFrame(); // (but should we?) (I guess so?)
 
+    // Send POST request along with the entity data
+    sendJSONXMLHTTPRequest('http://127.0.0.1:5000/entity/'.concat(entity), data, function(response) {
+        drawFrame();
+    });
 }
 
 var counter = 0;
@@ -245,24 +265,58 @@ mouse = (function() {
 })();
 
 // Add the application specific mouse listeners!
-//XXX: TODO Make these prettier!
+// Done: the perfect colours
 mouse.mousedowners.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'blue'});
+    addEntityWithoutName({'x':x,'y':y,'colour':'DarkBlue'});
 });
 
 mouse.mouseuppers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'red'});
+    addEntityWithoutName({'x':x,'y':y,'colour':'Magenta'});
 });
 
 mouse.mousedraggers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'green',
+    addEntityWithoutName({'x':x,'y':y,'colour':'ForestGreen',
                           'radius':10});
 });
 
 
 function update() {
-    //XXX: TODO Get the world from the webservice using a XMLHTTPRequest
-    drawFrame();
+    // Send AJAX request to get the world, draw if different than ours
+    sendJSONXMLHTTPRequest('http://127.0.0.1:5000/world', null, function(data) {      
+        if (!areSame(data, world)) {
+            world = data;
+            drawNextFrame();
+            drawFrame();
+        }
+    });
+}
+
+// Used to check if the response world is different from our current world
+function areIdentical(x, y) {
+    var xProperties = Object.getOwnPropertyNames(x);
+    var yProperties = Object.getOwnPropertyNames(y);
+
+    // If their number of properties differ, they aren't identical
+    if (yProperties.length != xProperties.length) {
+        return false;
+    }
+
+    // Loop through all values of the objects
+    for (var i = 0; i < xProperties.length; i++) {
+        var name = xProperties[i];
+
+        // If y has a different property name than x, not identical
+        if (!name in y) {
+            return false;
+        }
+        
+        // If their values for a given property differ, not identical
+        if (x[name] !== y[name]) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 // 30 frames per second
